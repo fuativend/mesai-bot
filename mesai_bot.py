@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Mesai Botu v3.1 - Panel Sistemi (Render/GitHub uyumlu)
+Mesai Botu v3.0 - Panel Sistemi
 - /panel komutu ile otomatik panel kurulumu
 - Canli durum (60 sn'de bir guncellenir)
 - Butonlar: Mesai Baslat / Mesai Bitir / Bilgilerim / Siralama
@@ -21,11 +21,13 @@ from discord import app_commands
 # ============================================================
 # AYARLAR
 # ============================================================
+# Token GitHub Secret olarak BOT_TOKEN adiyla tanimlanir
 TOKEN = os.environ.get("BOT_TOKEN", "")
 if not TOKEN:
     print("[-] BOT_TOKEN bulunamadi!")
     raise SystemExit(1)
 
+# Mesai sayilan ses kanallari (kucuk harf)
 MESAI_CHANNELS = ["aktif chief", "aktif memur"]
 
 DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mesailer.json")
@@ -34,6 +36,9 @@ PANEL_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panel_sta
 LINE = "\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501\u2501"
 
 
+# ============================================================
+# VERI YONETIMI
+# ============================================================
 def load_json(path, default):
     if os.path.exists(path):
         try:
@@ -75,12 +80,15 @@ def progress_bar(current, max_seconds, width=10):
     return "\u2588" * filled + "\u2591" * (width - filled)
 
 
+# ============================================================
+# BOT
+# ============================================================
 intents = discord.Intents.default()
 intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 data = load_json(DATA_FILE, {})
-active_sessions = {}
+active_sessions = {}  # user_id -> {"start": ts, "channel": name, "guild": id}
 panel_state = load_json(PANEL_FILE, {})
 
 
@@ -90,6 +98,9 @@ def is_mesai_channel(channel):
     return channel.name.lower() in [c.lower() for c in MESAI_CHANNELS]
 
 
+# ============================================================
+# PANEL EMBED
+# ============================================================
 def build_panel_embed():
     active_count = len(active_sessions)
 
@@ -176,10 +187,13 @@ def build_top_embed():
         )
 
     embed.add_field(name="\U0001f3af TOP 10", value="\n".join(lines), inline=False)
-    embed.set_footer(text="\U0001f534 = \u015fu an mesaide \u2022 Mesai Botu v3.1")
+    embed.set_footer(text="\U0001f534 = \u015fu an mesaide \u2022 Mesai Botu v3.0")
     return embed
 
 
+# ============================================================
+# PANEL VIEW (Butonlar)
+# ============================================================
 class PanelView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)
@@ -282,7 +296,7 @@ class PanelView(discord.ui.View):
         embed.add_field(name="\U0001f3af Toplam Mesai", value=f"\u23f1\ufe0f {format_duration(user_data['total_seconds'])}", inline=True)
         embed.add_field(name="\U0001f4cb Toplam Seans", value=str(len(user_data["sessions"])), inline=True)
         if str(user_id) in active_sessions:
-            embed.add_field(name="\U0001f534 Durum", value="\u015fu an mesaide!", inline=True)
+            embed.add_field(name="\U0001f534 Durum", value="\u015eu an mesaide!", inline=True)
 
         recent = user_data["sessions"][-3:]
         if recent:
@@ -306,6 +320,9 @@ class PanelView(discord.ui.View):
             print(f"[-] Panel guncelleme hatasi: {e}")
 
 
+# ============================================================
+# PANEL GUNCELLEME
+# ============================================================
 async def update_panel():
     if not panel_state:
         return
@@ -324,6 +341,9 @@ async def live_panel_loop():
         print(f"[-] Canli panel hatasi: {e}")
 
 
+# ============================================================
+# OTOMATIK SES TAKIBI
+# ============================================================
 @bot.event
 async def on_voice_state_update(member, before, after):
     user_id = str(member.id)
@@ -369,6 +389,9 @@ async def on_voice_state_update(member, before, after):
     await update_panel()
 
 
+# ============================================================
+# PANEL KURULUMU
+# ============================================================
 @bot.tree.command(name="panel", description="Mesai panelini otomatik kurar")
 @app_commands.default_permissions(administrator=True)
 async def panel(interaction: discord.Interaction):
@@ -381,6 +404,9 @@ async def panel(interaction: discord.Interaction):
     print(f"[+] Panel kuruldu: #{message.channel.name}")
 
 
+# ============================================================
+# KOMUTLAR
+# ============================================================
 @bot.tree.command(name="mesaim", description="Kendi toplam mesai sureni gosterir")
 async def mesaim(interaction: discord.Interaction):
     user_data = data.get(str(interaction.user.id))
@@ -436,6 +462,9 @@ async def mesaiaktif(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 
+# ============================================================
+# BASLAT
+# ============================================================
 @bot.event
 async def on_ready():
     print(f"[+] Bot giris yapti: {bot.user}")
@@ -451,6 +480,7 @@ async def on_ready():
     if panel_state:
         live_panel_loop.start()
 
+    # Render: HTTP saglik kontrolu (botun uyumamasi icin)
     try:
         app = web.Application()
 
@@ -467,11 +497,13 @@ async def on_ready():
     except Exception as e:
         print(f"[-] HTTP baslatilamadi: {e}")
 
+    # GitHub Actions'ta calisirken 5 saat 50 dk sonra kapan (veriyi kaydetmek icin)
     if os.environ.get("GITHUB_ACTIONS") == "true":
         bot.loop.create_task(auto_shutdown())
 
 
 async def auto_shutdown():
+    # Sadece GitHub Actions icin: 5 saat 50 dakika sonra veriyi kaydedip kapan
     await asyncio.sleep(350 * 60)
     print("[!] 5 saat 50 dk doldu, veri kaydediliyor ve kapaniliyor...")
     save_json(DATA_FILE, data)
